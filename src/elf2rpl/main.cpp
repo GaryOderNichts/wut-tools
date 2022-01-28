@@ -182,7 +182,9 @@ readElf(ElfFile &file, const std::string &filename)
  */
 static bool
 generateFileInfoSection(ElfFile &file,
-                        uint32_t flags)
+                        uint32_t flags,
+                        uint32_t preTrampSize,
+                        uint32_t postTrampSize)
 {
    elf::RplFileInfo info;
    info.version = 0xCAFE0402u;
@@ -193,7 +195,7 @@ generateFileInfoSection(ElfFile &file,
    info.loadSize = 0u;
    info.loadAlign = 4u;
    info.tempSize = 0u;
-   info.trampAdjust = 0u;
+   info.trampAdjust = preTrampSize;
    info.trampAddition = 0u;
    info.sdaBase = 0u;
    info.sda2Base = 0u;
@@ -246,6 +248,9 @@ generateFileInfoSection(ElfFile &file,
          info.tempSize += (size + 128);
       }
    }
+
+   // add extra space for trampoline data
+   info.textSize += preTrampSize + postTrampSize;
 
    info.textSize = align_up(info.textSize, info.textAlign);
    info.dataSize = align_up(info.dataSize, info.dataAlign);
@@ -912,7 +917,13 @@ int main(int argc, char **argv)
          .add_option("H,help",
                      description { "Show help." })
          .add_option("r,rpl",
-                     description { "Generate an RPL instead of an RPX" });
+                     description { "Generate an RPL instead of an RPX" })
+         .add_option("preTrampSize",
+                     description { "Space for pre-text trampolines (default = 0)" },
+                     value<uint32_t> {})
+         .add_option("postTrampSize",
+                     description { "Space for post-text trampolines (default = 0)" },
+                     value<uint32_t> {});
 
       parser.default_command()
          .add_argument("src",
@@ -940,6 +951,8 @@ int main(int argc, char **argv)
    auto src = options.get<std::string>("src");
    auto dst = options.get<std::string>("dst");
    auto isRpl = options.has("rpl");
+   auto preTrampSize = options.get<uint32_t>("preTrampSize");
+   auto postTrampSize = options.get<uint32_t>("postTrampSize");
 
    // Read elf into memory object!
    ElfFile elf;
@@ -964,7 +977,7 @@ int main(int argc, char **argv)
       return -1;
    }
 
-   if (!generateFileInfoSection(elf, isRpl ? 0 : elf::RPL_IS_RPX)) {
+   if (!generateFileInfoSection(elf, isRpl ? 0 : elf::RPL_IS_RPX, preTrampSize, postTrampSize)) {
       fmt::print("ERROR: generateFileInfoSection failed.\n");
       return -1;
    }
