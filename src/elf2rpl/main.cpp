@@ -182,7 +182,9 @@ readElf(ElfFile &file, const std::string &filename)
  */
 static bool
 generateFileInfoSection(ElfFile &file,
-                        uint32_t flags)
+                        uint32_t flags,
+                        uint32_t preTrampSize,
+                        uint32_t postTrampSize)
 {
    elf::RplFileInfo info;
    info.version = 0xCAFE0402u;
@@ -193,7 +195,7 @@ generateFileInfoSection(ElfFile &file,
    info.loadSize = 0u;
    info.loadAlign = 4u;
    info.tempSize = 0u;
-   info.trampAdjust = 0u;
+   info.trampAdjust = preTrampSize;
    info.trampAddition = 0u;
    info.sdaBase = 0u;
    info.sda2Base = 0u;
@@ -246,6 +248,9 @@ generateFileInfoSection(ElfFile &file,
          info.tempSize += (size + 128);
       }
    }
+
+   // add extra space for trampoline data
+   info.textSize += preTrampSize + postTrampSize;
 
    info.textSize = align_up(info.textSize, info.textAlign);
    info.dataSize = align_up(info.dataSize, info.dataAlign);
@@ -338,7 +343,7 @@ getSymbol(ElfFile::Section &section,
  * The Wii U does not support every type of relocation.
  */
 static bool
-fixRelocations(ElfFile &file)
+fixRelocations(ElfFile &file, uint32_t& numTrampolines)
 {
    std::set<unsigned int> unsupportedTypes;
    auto result = true;
@@ -371,7 +376,6 @@ fixRelocations(ElfFile &file)
          case elf::R_PPC_ADDR16_LO:
          case elf::R_PPC_ADDR16_HI:
          case elf::R_PPC_ADDR16_HA:
-         case elf::R_PPC_REL24:
          case elf::R_PPC_REL14:
          case elf::R_PPC_DTPMOD32:
          case elf::R_PPC_DTPREL32:
@@ -384,6 +388,13 @@ fixRelocations(ElfFile &file)
          case elf::R_PPC_DIAB_RELSDA_HI:
          case elf::R_PPC_DIAB_RELSDA_HA:
             // All valid relocations on Wii U, do nothing
+            break;
+
+         /*
+          * Count the amount of R_PPC_REL24 for the max amount of needed trampolines
+          */
+         case elf::R_PPC_REL24:
+            numTrampolines++;
             break;
 
          /*
@@ -949,7 +960,8 @@ int main(int argc, char **argv)
       return -1;
    }
 
-   if (!fixRelocations(elf)) {
+   uint32_t numTrampolines = 0;
+   if (!fixRelocations(elf, numTrampolines)) {
       fmt::print("ERROR: fixRelocations failed.\n");
       return -1;
    }
@@ -964,7 +976,7 @@ int main(int argc, char **argv)
       return -1;
    }
 
-   if (!generateFileInfoSection(elf, isRpl ? 0 : elf::RPL_IS_RPX)) {
+   if (!generateFileInfoSection(elf, isRpl ? 0 : elf::RPL_IS_RPX, numTrampolines * 16, numTrampolines * 16)) {
       fmt::print("ERROR: generateFileInfoSection failed.\n");
       return -1;
    }
